@@ -1,0 +1,113 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pulseforge"
+version = "0.1.0"
+description = "AI-driven pipeline that categorizes, templates, and tracks the health of unstructured log streams"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+
+authors = [
+    { name = "Tuyen Mathew Duong", email = "tuyen@geekstrident.com" }
+]
+
+maintainers = [
+    { name = "Tuyen Mathew Duong", email = "tuyen@geekstrident.com" }
+]
+
+dependencies = [
+    "click>=8.1",
+    "PyYAML>=6.0",
+    # The template-forging stage (trial -> integration -> promotion) is not
+    # reimplemented here -- pulseforge.forge.adapter delegates straight to
+    # parseforge's existing, already-validated pipeline. See forge/adapter.py.
+    "parseforge>=0.3.1",
+    # Same multi-provider LLM call primitive parseforge itself is built on
+    # (see parseforge/naming/llm.py) -- used directly here for envelope
+    # format detection fallback and log-type category naming, both of
+    # which are pulseforge-specific prompts, not parseforge's cli-name one.
+    "textfsm-ai>=0.7.1",
+]
+
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+
+    "Topic :: System :: Logging",
+    "Topic :: System :: Monitoring",
+    "Topic :: Text Processing",
+    "Topic :: Utilities",
+
+    "Operating System :: OS Independent",
+]
+
+keywords = [
+    "log parsing",
+    "log analysis",
+    "observability",
+    "aiops",
+    "template generator",
+    "ai",
+    "llm",
+    "netmiko",
+    "anomaly detection",
+]
+
+[project.optional-dependencies]
+# Mirrors parseforge's own per-provider extras (same textfsm-ai backend) --
+# add the extra(s) for whichever provider(s) do envelope/category naming.
+anthropic = ["textfsm-ai[anthropic]>=0.7.1"]
+openai = ["textfsm-ai[openai]>=0.7.1"]
+sampling = ["netmiko>=4.0"]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.4.0",
+    "black>=24.0.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+pulseforge = "pulseforge.cli.main:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pulseforge*"]
+exclude = ["tests*", "store*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --cov=pulseforge --cov-report=term-missing"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "real: marks tests that require real API calls or external services",
+]
+
+[tool.coverage.report]
+# Raise as stub modules get real implementations -- see README.md Status.
+fail_under = 0
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 88
+fix = true
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

@@ -1,0 +1,17 @@
+# Known envelope formats, checked in order before falling back to an LLM
+# (detector.py). Each entry names the format and gives the regex used to
+# split <timestamp><separator><marker?>: <body> away from the raw line.
+# Placeholders only -- real patterns land with the first real
+# implementation of detector.py.
+
+- name: rfc3164-syslog
+  # e.g. "Aug  3 09:15:01.123: %LINK-3-UPDOWN: Interface ... down"
+  pattern: null
+
+- name: rfc5424-syslog
+  # e.g. "2026-08-03T09:15:01.123Z host app[1234]: message"
+  pattern: null
+
+- name: iso8601-generic
+  # e.g. "2026-08-03 09:15:01,123 INFO message"
+  pattern: null

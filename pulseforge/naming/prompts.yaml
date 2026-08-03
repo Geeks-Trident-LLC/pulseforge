@@ -1,0 +1,9 @@
+# Prompt templates for log-body category naming (llm.py). Placeholder --
+# real prompt text lands with the first real implementation, following
+# ParseForge's naming convention (SPEC.md §3): lowercase, hyphenated,
+# literal tokens kept, variable spans elided.
+
+log_body_category: |
+  TODO: prompt text for naming a log body's category given its marker
+  (if any) and body text. See SPEC.md §3 for the naming convention this
+  must follow.
