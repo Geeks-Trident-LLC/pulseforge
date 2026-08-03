@@ -77,6 +77,13 @@ dev = [
     "black>=24.0.0",
     "mypy>=1.10.0",
 ]
+# Tooling for the Makefile's bump-* targets and a future package-build
+# step -- mirrors parseforge's own "release" extra. bump2version isn't
+# otherwise installed anywhere; the Makefile assumes it's already on PATH.
+release = [
+    "bump2version",
+    "build",
+]
 
 [project.scripts]
 pulseforge = "pulseforge.cli.main:main"
