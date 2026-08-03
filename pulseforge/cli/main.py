@@ -12,7 +12,9 @@ def main() -> None:
 
 
 @main.command("run")
-@click.option("--source", required=True, help="Identifier for the log source (device/app).")
+@click.option(
+    "--source", required=True, help="Identifier for the log source (device/app)."
+)
 @click.option(
     "--file",
     "file_path",
@@ -46,7 +48,9 @@ def run_cmd(
 
 @main.command("pulse")
 @click.option("--category", required=True, help="Category to report health for.")
-@click.option("--root", type=click.Path(exists=True), default="./store", show_default=True)
+@click.option(
+    "--root", type=click.Path(exists=True), default="./store", show_default=True
+)
 def pulse_cmd(category: str, root: str) -> None:
     """Print the current health score for a single category.
 
