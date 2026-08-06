@@ -1,11 +1,4 @@
-VERSION := $(shell python - <<'EOF'
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
-print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])
-EOF
-)
+VERSION := $(shell grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
 
 CURRENT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 

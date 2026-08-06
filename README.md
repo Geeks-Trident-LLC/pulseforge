@@ -6,19 +6,43 @@ templated, health-scored signal — a sibling project to
 trial → integration → promotion template pipeline instead of
 reimplementing it.
 
-Full design plan: [SPEC.md](SPEC.md).
+Full design plan: [SPEC.md](https://github.com/Geeks-Trident-LLC/pulseforge/blob/main/SPEC.md).
 
-## Why
+## What is PulseForge?
 
-CLI-command output ("show interface status") and log-body messages
-("%LINK-3-UPDOWN: Interface ... changed state to down") are both just
-"unstructured text that recurs in a small number of shapes and needs a
-template." ParseForge already solves the hard part of that problem —
-LLM-drafted templates, self-validated against their own sample,
-clustered by output schema, and promoted only once they clear a match-rate
-gate, with a human-reviewed path for anything short of it. PulseForge
-applies that same machinery to log messages, and adds the two things logs
-need that CLI output doesn't:
+Logs — from network devices, servers, applications — are just lines of
+unstructured text: a timestamp, then a message body whose shape depends
+entirely on whatever produced it. Turning that into something you can
+actually act on means answering the same three questions for every
+distinct kind of line: what category of event is this, what does a
+well-formed instance of it look like structurally, and is this category
+behaving normally right now?
+
+PulseForge answers all three. It splits a log line's timestamp from its
+message body, has an AI name the body's category, forges and validates a
+parsing template for that category — by delegating to
+[ParseForge](https://github.com/Geeks-Trident-LLC/parseforge)'s own
+trial → integration → promotion pipeline rather than reimplementing it —
+and then tracks that category's match rate, frequency, and field values
+over time to flag when it starts behaving inconsistently.
+
+## Why do you need PulseForge?
+
+Any team running nontrivial infrastructure ends up staring at a firehose
+of log lines it can't parse, categorize, or trust: whoever wrote the
+software chose the message formats, not you, and nobody hands you a
+parser for every one of them. So teams either write and maintain regex by
+hand for every log type they care about — the same tedious, brittle work
+ParseForge already replaces for CLI output — or they give up and treat
+logs as a search index instead of structured signal, which means "is this
+category of event healthy right now" stays a question a human has to
+answer by eyeballing a dashboard, if anyone thinks to ask it at all.
+
+PulseForge turns that firehose into per-category structured data and an
+ongoing health signal, automatically, with the same human-in-the-loop
+review guarantees ParseForge already provides for CLI parsing.
+
+## Features
 
 - **Envelope splitting** — a log line isn't one blob, it's a
   `<date-time-marker>: <log-body>` pair. The marker has to be split off
@@ -27,6 +51,10 @@ need that CLI output doesn't:
   command vocabulary to resolve against; an AI has to look at a log body
   and name its type (`LINK-3-UPDOWN`) before a template can even be
   requested for it.
+- **Delegated template forging, not reinvented.** Template generation,
+  self-validation, schema clustering, and promotion all come straight from
+  ParseForge's own pipeline — a PulseForge category is passed through it
+  exactly the way ParseForge passes a cli-name.
 - **Pulse (health) scoring** — once a category has an authoritative
   template, PulseForge tracks its match-rate, frequency, and field-value
   distribution over time and flags when a category goes unhealthy or
@@ -40,13 +68,7 @@ ingestion -> envelope split -> category naming -> template forge (delegates
 to parseforge) -> parse -> pulse/health scoring -> sink
 ```
 
-See [SPEC.md](SPEC.md) for the full breakdown of each stage.
-
-## Status
-
-Scaffold only. Directory layout and module boundaries are in place;
-pipeline stages are stubs (`NotImplementedError`) pending real
-implementation. Nothing here is wired end to end yet.
+See [SPEC.md](https://github.com/Geeks-Trident-LLC/pulseforge/blob/main/SPEC.md) for the full breakdown of each stage.
 
 ## Installation
 
@@ -54,12 +76,3 @@ implementation. Nothing here is wired end to end yet.
 # local development
 pip install -e ".[dev,sampling]"
 ```
-
-## Relationship to ParseForge
-
-PulseForge depends on `parseforge` as an ordinary pip package — the
-template-forging stage (`pulseforge/forge/adapter.py`) calls straight into
-`parseforge.api` rather than forking or copying its pipeline. A PulseForge
-"category" is passed into that pipeline the same way ParseForge's own CLI
-resolves and passes a "cli-name": as the key a group of samples is
-generated, validated, and promoted under.
