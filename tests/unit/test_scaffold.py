@@ -26,4 +26,4 @@ def test_cli_group_importable() -> None:
 
 def test_stub_stages_raise_not_implemented() -> None:
     with pytest.raises(NotImplementedError):
-        api.split_envelope("Aug  3 09:15:01.123: %LINK-3-UPDOWN: down")
+        api.resolve_category("test-source", None, "some body")
