@@ -42,10 +42,15 @@ class EnvelopeSplit:
 def load_known_patterns() -> list[tuple[str, re.Pattern[str]]]:
     """Load and compile every entry in patterns.yaml, in file order --
     the order they're tried in split_envelope().
+
+    Every pattern is compiled with re.VERBOSE, so patterns.yaml can write
+    a readable, commented, multi-line regex instead of one long line --
+    see its own header comment for the whitespace/escaping conventions
+    that requires.
     """
     entries = yaml.safe_load(_PATTERNS_PATH.read_text(encoding="utf-8")) or []
     return [
-        (entry["name"], re.compile(entry["pattern"]))
+        (entry["name"], re.compile(entry["pattern"], re.VERBOSE))
         for entry in entries
         if entry.get("pattern")
     ]

@@ -2,6 +2,12 @@
 # (detector.py). Each entry names the format and gives the regex used to
 # split <timestamp><separator><marker?>: <body> away from the raw line.
 #
+# Every pattern here is compiled with re.VERBOSE (detector.py's
+# load_known_patterns()) -- a literal single space in the wire format is
+# written as \x20, never a bare space, since re.VERBOSE ignores
+# unescaped whitespace and a bare trailing space before a newline is
+# exactly the kind of thing an editor or formatter silently strips.
+#
 # RFC 5424 only, deliberately (SPEC.md §2.2): its fixed-width,
 # unambiguous grammar (explicit year+timezone, single-token HOSTNAME,
 # bracketed STRUCTURED-DATA) makes it the one format worth a precise
@@ -15,14 +21,31 @@
 # msg. detector.py's _from_rfc5424() is the only code that knows these
 # group names -- adding a future entry here means also adding its own
 # _from_<name>() extractor, not reusing this one.
-#
-# structured_data's "(?:\[[^\]]*\])+" branch doesn't handle an escaped
-# "\]" inside a quoted PARAM-VALUE (RFC 5424 §6.3.3 allows one) -- a
-# known v1 simplification, not a correctness bug to silently ignore:
-# such a line falls through to NoMatchingPatternError, which is exactly
-# what routes it to the LLM fallback path (SPEC.md §2.2 step 2) instead
-# of being silently misparsed.
 
 - name: rfc5424-syslog
   # e.g. "<34>1 2003-10-11T22:14:15.003Z mymachine.example.com su - ID47 - 'su root' failed for lonvick on /dev/pts/8"
-  pattern: '^<(?P<pri>\d{1,3})>(?P<version>\d{1,3}) (?P<timestamp>-|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})) (?P<hostname>[\x21-\x7E]{1,255}) (?P<app_name>[\x21-\x7E]{1,48}) (?P<proc_id>[\x21-\x7E]{1,128}) (?P<msg_id>[\x21-\x7E]{1,32}) (?P<structured_data>-|(?:\[[^\]]*\])+)(?: (?P<msg>.*))?$'
+  pattern: |
+    ^<(?P<pri>\d{1,3})>                      # PRI: <facility*8+severity>; range (0-191) checked in code, not here
+    (?P<version>\d{1,3})\x20                 # VERSION -- only "1" is defined today; checked in code
+    (?P<timestamp>
+        -                                    # NILVALUE
+      | \d{4}-\d{2}-\d{2}T                   # full-date "YYYY-MM-DD" + literal "T"
+        \d{2}:\d{2}:\d{2}                    # partial-time "HH:MM:SS"
+        (?:\.\d{1,6})?                       # optional fractional seconds (1-6 digits)
+        (?:Z|[+-]\d{2}:\d{2})                # time-offset: "Z", or "+HH:MM"/"-HH:MM"
+    )\x20
+    (?P<hostname>[\x21-\x7E]{1,255})\x20     # HOSTNAME: 1-255 printable US-ASCII (NILVALUE "-" included)
+    (?P<app_name>[\x21-\x7E]{1,48})\x20      # APP-NAME: 1-48 printable US-ASCII
+    (?P<proc_id>[\x21-\x7E]{1,128})\x20      # PROC-ID: 1-128 printable US-ASCII
+    (?P<msg_id>[\x21-\x7E]{1,32})\x20        # MSG-ID: 1-32 printable US-ASCII
+    (?P<structured_data>
+        -                                    # NILVALUE
+      | (?:\[[^\]]*\])+                      # one-or-more "[...]" blocks -- doesn't handle an
+                                              # escaped "\]" inside a quoted PARAM-VALUE (RFC 5424
+                                              # §6.3.3 allows one); a known v1 simplification, not
+                                              # silently ignored: such a line falls through to
+                                              # NoMatchingPatternError, routing to the LLM fallback
+                                              # path (SPEC.md §2.2 step 2) instead of being misparsed
+    )
+    (?:\x20(?P<msg>.*))?                     # optional trailing MSG, SP-separated
+    $
