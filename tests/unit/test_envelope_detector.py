@@ -5,9 +5,13 @@ NoMatchingPatternError instead of silently misparsing.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+import pulseforge.envelope.detector as detector
 from pulseforge.envelope.detector import (
+    DuplicatePatternNameError,
     NoMatchingPatternError,
     load_known_patterns,
     split_envelope,
@@ -99,3 +103,32 @@ def test_rfc3164_style_line_does_not_match() -> None:
 def test_garbage_line_does_not_match() -> None:
     with pytest.raises(NoMatchingPatternError):
         split_envelope("this is not a syslog line at all")
+
+
+def test_non_ascii_digits_do_not_match() -> None:
+    """re.ASCII must be in effect -- RFC 5424's DIGIT is strictly ASCII
+    0-9, but \\d without re.ASCII also matches non-ASCII Unicode decimal
+    digits (verified separately: Arabic-Indic/Devanagari digit strings
+    match a bare \\d{3} pattern by default). A PRI built from Arabic-Indic
+    digits for "192" must not match here.
+    """
+    arabic_indic_192 = "١٩٢"
+    line = f"<{arabic_indic_192}>1 2003-10-11T22:14:15.003Z host app - - - msg"
+    with pytest.raises(NoMatchingPatternError):
+        split_envelope(line)
+
+
+def test_duplicate_pattern_name_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    duplicate_patterns = tmp_path / "patterns.yaml"
+    duplicate_patterns.write_text(
+        "- name: rfc5424-syslog\n"
+        "  pattern: 'a'\n"
+        "- name: rfc5424-syslog\n"
+        "  pattern: 'b'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "_PATTERNS_PATH", duplicate_patterns)
+    with pytest.raises(DuplicatePatternNameError, match="rfc5424-syslog"):
+        load_known_patterns()

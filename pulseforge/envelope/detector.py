@@ -30,6 +30,17 @@ class NoMatchingPatternError(ValueError):
     """
 
 
+class DuplicatePatternNameError(ValueError):
+    """Raised when patterns.yaml has two entries with the same name.
+
+    A copy-pasted "name:" typo wouldn't otherwise be caught: patterns.yaml
+    is a list, not a mapping, so YAML itself won't reject or silently drop
+    either entry -- both stay in _KNOWN_PATTERNS, and the second is simply
+    unreachable (split_envelope returns on the first match), not an error,
+    until this check catches it at load time instead.
+    """
+
+
 @dataclass(frozen=True)
 class EnvelopeSplit:
     format: str
@@ -43,17 +54,27 @@ def load_known_patterns() -> list[tuple[str, re.Pattern[str]]]:
     """Load and compile every entry in patterns.yaml, in file order --
     the order they're tried in split_envelope().
 
-    Every pattern is compiled with re.VERBOSE, so patterns.yaml can write
-    a readable, commented, multi-line regex instead of one long line --
-    see its own header comment for the whitespace/escaping conventions
-    that requires.
+    Every pattern is compiled with re.VERBOSE (patterns.yaml writes a
+    readable, commented, multi-line regex instead of one long line -- see
+    its own header comment for the whitespace/escaping conventions that
+    requires) and re.ASCII (RFC 5424's DIGIT is strictly ASCII 0-9; \\d
+    without re.ASCII also matches non-ASCII Unicode decimal digits --
+    Arabic-Indic, Devanagari, etc. -- which would silently accept a line
+    RFC 5424 doesn't).
     """
     entries = yaml.safe_load(_PATTERNS_PATH.read_text(encoding="utf-8")) or []
-    return [
-        (entry["name"], re.compile(entry["pattern"], re.VERBOSE))
-        for entry in entries
-        if entry.get("pattern")
-    ]
+    seen: set[str] = set()
+    patterns: list[tuple[str, re.Pattern[str]]] = []
+    for entry in entries:
+        name = entry["name"]
+        if name in seen:
+            raise DuplicatePatternNameError(
+                f"duplicate pattern name {name!r} in patterns.yaml"
+            )
+        seen.add(name)
+        if entry.get("pattern"):
+            patterns.append((name, re.compile(entry["pattern"], re.VERBOSE | re.ASCII)))
+    return patterns
 
 
 _KNOWN_PATTERNS = load_known_patterns()
