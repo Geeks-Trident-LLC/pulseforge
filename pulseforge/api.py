@@ -9,7 +9,7 @@ change without notice.
 
 from __future__ import annotations
 
-from .envelope.detector import EnvelopeSplit, split_envelope
+from .envelope.detector import EnvelopeSplit, NoMatchingPatternError, split_envelope
 from .health.pulse import CategoryHealth, score_health
 from .naming.resolver import CategoryResolution, resolve_category
 from .parsing.engine import ParsedRecord, parse_body
@@ -17,6 +17,7 @@ from .pipeline import PulseForgeConfig, run
 
 __all__ = [
     "EnvelopeSplit",
+    "NoMatchingPatternError",
     "split_envelope",
     "CategoryResolution",
     "resolve_category",
