@@ -27,7 +27,7 @@ from .envelope.detector import (
 )
 from .health.pulse import CategoryHealth, score_health
 from .ingestion.backends.file import FileBackend
-from .ingestion.core import IngestionBackend
+from .ingestion.core import IngestionBackend, strip_ansi_codes
 from .naming.resolver import CategoryResolution, resolve_category
 from .parsing.engine import ParsedRecord, parse_body
 from .pipeline import PulseForgeConfig, run
@@ -41,6 +41,7 @@ __all__ = [
     "detect_format",
     "IngestionBackend",
     "FileBackend",
+    "strip_ansi_codes",
     "CategoryResolution",
     "resolve_category",
     "ParsedRecord",

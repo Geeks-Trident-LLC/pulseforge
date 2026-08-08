@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator
 
+from ..core import strip_ansi_codes
+
 
 class FileBackend:
     def __init__(self, path: Path) -> None:
@@ -13,4 +15,4 @@ class FileBackend:
     def read_lines(self) -> Iterator[str]:
         with self.path.open("r", encoding="utf-8") as f:
             for line in f:
-                yield line.rstrip("\r\n")
+                yield strip_ansi_codes(line.rstrip("\r\n"))

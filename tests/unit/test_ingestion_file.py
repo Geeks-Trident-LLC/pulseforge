@@ -51,3 +51,15 @@ def test_read_lines_preserves_blank_lines(tmp_path: Path) -> None:
     lines = list(FileBackend(path).read_lines())
 
     assert lines == ["first line", "", "third line"]
+
+
+def test_read_lines_strips_ansi_color_codes(tmp_path: Path) -> None:
+    path = tmp_path / "log.txt"
+    path.write_text(
+        "\x1b[31mERROR\x1b[0m: bad thing\nplain line\n\x1b[32mOK\x1b[0m: fine\n",
+        encoding="utf-8",
+    )
+
+    lines = list(FileBackend(path).read_lines())
+
+    assert lines == ["ERROR: bad thing", "plain line", "OK: fine"]

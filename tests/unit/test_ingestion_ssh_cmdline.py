@@ -67,3 +67,21 @@ def test_read_lines_handles_trailing_newline_without_empty_entry(
     lines = list(SSHCmdlineBackend(connection, "show logging").read_lines())
 
     assert lines == ["line one", "line two"]
+
+
+def test_read_lines_strips_ansi_color_codes(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A device/shell that colorizes its own prompts and messages --
+    # common enough over a real SSH session that this can't be assumed
+    # away, even though netmiko itself often already handles it.
+    monkeypatch.setattr(
+        ssh_cmdline,
+        "ConnectHandler",
+        _mock_connect_handler("\x1b[31mERROR\x1b[0m: link down\nplain line"),
+    )
+    connection = SSHConnection(
+        device_type="cisco_ios", host="10.0.0.1", username="admin", password="secret"
+    )
+
+    lines = list(SSHCmdlineBackend(connection, "show logging").read_lines())
+
+    assert lines == ["ERROR: link down", "plain line"]

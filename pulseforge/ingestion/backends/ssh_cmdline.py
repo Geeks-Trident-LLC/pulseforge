@@ -23,6 +23,8 @@ from typing import Iterator, cast
 
 from netmiko import ConnectHandler
 
+from ..core import strip_ansi_codes
+
 
 @dataclass(frozen=True)
 class SSHConnection:
@@ -49,4 +51,5 @@ class SSHCmdlineBackend:
             # emit structured output when a use_textfsm/use_genie/use_ttp
             # flag is passed -- we never pass one, so this is always a str.
             output = cast(str, conn.send_command(self.command))
-        yield from output.splitlines()
+        for line in output.splitlines():
+            yield strip_ansi_codes(line)
