@@ -13,7 +13,9 @@ import pytest
 import pulseforge.envelope.detector as detector
 from pulseforge.envelope.detector import (
     DuplicatePatternNameError,
+    EnvelopeSplit,
     NoMatchingPatternError,
+    UnknownEnvelopeSplit,
     detect_format,
     load_known_patterns,
     split_envelope,
@@ -143,19 +145,20 @@ def test_duplicate_pattern_name_raises(
 
 
 def test_detect_format_at_default_threshold() -> None:
-    # 95/100 -- exactly clears the default 95% bar (>=, not >).
-    sample = [_VALID_RFC5424_LINE] * 95 + [_GARBAGE_LINE] * 5
+    # 99/100 -- exactly clears the default 99% bar (>=, not >).
+    sample = [_VALID_RFC5424_LINE] * 99 + [_GARBAGE_LINE] * 1
     result = detect_format(sample)
     assert result.format == "rfc5424-syslog"
     assert result.sample_size == 100
-    assert result.matched == 95
-    assert result.match_rate == pytest.approx(0.95)
+    assert result.matched == 99
+    assert result.match_rate == pytest.approx(0.99)
 
 
 def test_detect_format_below_default_threshold_raises() -> None:
-    # 90/100 -- clears SPEC.md's illustrative "e.g. >=90%" but not our
-    # actual 95% default; must not silently detect on a looser bar.
-    sample = [_VALID_RFC5424_LINE] * 90 + [_GARBAGE_LINE] * 10
+    # 95/100 clears SPEC.md's illustrative "e.g. >=90%" and even the
+    # earlier 95% default, but not the current 99% one -- must not
+    # silently detect on a looser bar than what's actually configured.
+    sample = [_VALID_RFC5424_LINE] * 95 + [_GARBAGE_LINE] * 5
     with pytest.raises(NoMatchingPatternError, match="no known pattern cleared"):
         detect_format(sample)
 
@@ -191,14 +194,78 @@ def test_detect_format_respects_smaller_custom_sample_size() -> None:
 
 def test_detect_format_ambiguous_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Not reachable with patterns.yaml's real single entry -- exercises
-    the ambiguous branch directly by faking two patterns that both
-    "match" every sample line, standing in for two real formats whose
-    regex banks both happen to clear the bar on the same source.
+    the ambiguous branch directly by faking two patterns whose parse
+    pass always "succeeds" on every sample line, standing in for two
+    real formats whose regex banks both happen to clear the bar on the
+    same source.
     """
     fake_patterns = [("fake-a", re.compile(".*")), ("fake-b", re.compile(".*"))]
     monkeypatch.setattr(detector, "_KNOWN_PATTERNS", fake_patterns)
-    monkeypatch.setattr(
-        detector, "_matches_pattern", lambda name, pattern, stripped: True
-    )
+
+    def fake_parse_sample(
+        name: str, pattern: re.Pattern[str], sample: list[str]
+    ) -> list[EnvelopeSplit | UnknownEnvelopeSplit]:
+        return [
+            EnvelopeSplit(
+                format=name, timestamp="-", marker=None, body=line, raw=line, index=i
+            )
+            for i, line in enumerate(sample)
+        ]
+
+    monkeypatch.setattr(detector, "_parse_sample_against_pattern", fake_parse_sample)
     with pytest.raises(NoMatchingPatternError, match="ambiguous"):
         detect_format(["anything"] * 10)
+
+
+def test_detect_format_populates_index_on_every_result() -> None:
+    sample = [_VALID_RFC5424_LINE] * 99 + [_GARBAGE_LINE] * 1
+    result = detect_format(sample)
+    assert [r.index for r in result.results] == list(range(100))
+
+
+def test_detect_format_unknown_splits_contain_failing_lines() -> None:
+    sample = [_VALID_RFC5424_LINE] * 99 + [_GARBAGE_LINE]
+    result = detect_format(sample)
+    assert len(result.envelope_splits) == 99
+    assert len(result.unknown_splits) == 1
+    unknown = result.unknown_splits[0]
+    assert unknown.raw == _GARBAGE_LINE
+    assert unknown.attempted_format == "rfc5424-syslog"
+    assert unknown.index == 99
+    assert "no known envelope pattern matched" not in unknown.reason  # sanity: this
+    # message comes from _parse_sample_against_pattern, not split_envelope's wording
+    assert unknown.reason  # non-empty, whatever the specific wording is
+
+
+def test_detect_format_results_preserve_original_order() -> None:
+    # Garbage line sandwiched between two valid ones -- results must
+    # reflect that exact interleaving, not "all successes then all
+    # failures" the way two separately-built lists would collapse it to.
+    sample = [_VALID_RFC5424_LINE] * 49 + [_GARBAGE_LINE] + [_VALID_RFC5424_LINE] * 50
+    result = detect_format(sample, match_rate_threshold=0.98)
+    assert isinstance(result.results[48], EnvelopeSplit)
+    assert isinstance(result.results[49], UnknownEnvelopeSplit)
+    assert isinstance(result.results[50], EnvelopeSplit)
+
+
+def test_previous_and_next_result_navigate_across_success_and_failure() -> None:
+    sample = [_VALID_RFC5424_LINE] * 49 + [_GARBAGE_LINE] + [_VALID_RFC5424_LINE] * 50
+    result = detect_format(sample, match_rate_threshold=0.98)
+    unknown = result.unknown_splits[0]
+    assert unknown.index == 49
+
+    before = result.previous_result(unknown.index)
+    after = result.next_result(unknown.index)
+    assert isinstance(before, EnvelopeSplit) and before.index == 48
+    assert isinstance(after, EnvelopeSplit) and after.index == 50
+
+    # Navigating from a success works the same way, and finding "the next
+    # unknown" from an arbitrary starting point is just walking next_result
+    # until isinstance(..., UnknownEnvelopeSplit) -- no separate API needed.
+    assert result.previous_result(0) is None
+    assert result.next_result(len(result.results) - 1) is None
+
+
+def test_split_envelope_standalone_has_no_index() -> None:
+    result = split_envelope(_VALID_RFC5424_LINE)
+    assert result.index is None

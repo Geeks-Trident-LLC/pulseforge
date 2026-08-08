@@ -13,6 +13,7 @@ from .envelope.detector import (
     EnvelopeSplit,
     FormatDetectionResult,
     NoMatchingPatternError,
+    UnknownEnvelopeSplit,
     detect_format,
     split_envelope,
 )
@@ -24,6 +25,7 @@ from .pipeline import PulseForgeConfig, run
 __all__ = [
     "EnvelopeSplit",
     "FormatDetectionResult",
+    "UnknownEnvelopeSplit",
     "NoMatchingPatternError",
     "split_envelope",
     "detect_format",

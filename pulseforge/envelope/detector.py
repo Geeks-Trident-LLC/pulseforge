@@ -6,12 +6,14 @@ cached afterward the same way naming/cache.py caches category resolutions
 so a given source only ever pays that cost once per distinct envelope
 shape. This module only implements the regex-bank half (SPEC.md §2.2 step
 1) -- the LLM fallback (step 2) and confirm/persist (§2.3) are separate
-concerns, not yet built; NoMatchingPatternError is what a future caller
+concerns, not yet built (and deliberately deferred as a later add-on, not
+guessed at ahead of need); NoMatchingPatternError is what a future caller
 catches to know it's time to fall back.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import re
 from collections.abc import Iterable
@@ -55,20 +57,82 @@ class EnvelopeSplit:
     marker: str | None
     body: str
     raw: str
+    # Position within a detect_format() sample -- None for a standalone
+    # split_envelope() call, which has no batch/sample context to number.
+    index: int | None = None
+
+
+@dataclass(frozen=True)
+class UnknownEnvelopeSplit:
+    """A sample line that failed to parse against the source's detected
+    format -- kept, not discarded, so a human can review exactly which
+    lines a match-rate threshold's failure allowance actually covers
+    before trusting the detection, instead of just trusting a bare
+    percentage (SPEC.md §2.3's "a preview, not a label" principle,
+    applied to the failures too, not just the successes).
+
+    Always arises from a batch/sample context (detect_format()'s
+    per-pattern scoring pass) -- unlike EnvelopeSplit.index, there's no
+    standalone case where this index wouldn't be meaningful, so it's
+    required, not optional.
+    """
+
+    index: int
+    raw: str
+    attempted_format: str
+    reason: str
 
 
 @dataclass(frozen=True)
 class FormatDetectionResult:
     """A source's auto-detected format (SPEC.md §2.2 step 1), plus the
     evidence behind it -- callers deciding whether to trust an
-    auto-detection (or show it to a user per §2.3) need the numbers, not
-    just the name.
+    auto-detection (or show it to a user per §2.3) need the actual
+    per-line results, not just a match-rate number.
+
+    results is every sample line's outcome, in original sample order --
+    the single source of truth for adjacency (see previous_result() /
+    next_result()). envelope_splits/unknown_splits are filtered views
+    over the same list, not separate data, so splitting a line into
+    "success" or "failure" never loses its position relative to its
+    neighbors the way two independently-built lists would.
     """
 
     format: str
     sample_size: int
     matched: int
     match_rate: float
+    results: list[EnvelopeSplit | UnknownEnvelopeSplit]
+
+    @property
+    def envelope_splits(self) -> list[EnvelopeSplit]:
+        return [r for r in self.results if isinstance(r, EnvelopeSplit)]
+
+    @property
+    def unknown_splits(self) -> list[UnknownEnvelopeSplit]:
+        return [r for r in self.results if isinstance(r, UnknownEnvelopeSplit)]
+
+    def previous_result(
+        self, index: int
+    ) -> EnvelopeSplit | UnknownEnvelopeSplit | None:
+        """The result immediately before ``index`` in original sample
+        order -- may be either an EnvelopeSplit or an UnknownEnvelopeSplit,
+        regardless of which one ``index`` itself is. None if there isn't
+        one (index is first, or out of bounds).
+        """
+        prev_index = index - 1
+        if 0 <= prev_index < len(self.results):
+            return self.results[prev_index]
+        return None
+
+    def next_result(self, index: int) -> EnvelopeSplit | UnknownEnvelopeSplit | None:
+        """The result immediately after ``index`` in original sample
+        order. None if there isn't one (index is last, or out of bounds).
+        """
+        next_index = index + 1
+        if 0 <= next_index < len(self.results):
+            return self.results[next_index]
+        return None
 
 
 def load_known_patterns() -> list[tuple[str, re.Pattern[str]]]:
@@ -118,12 +182,14 @@ def detect_format(
     lines: Iterable[str],
     *,
     sample_size: int = 100,
-    match_rate_threshold: float = 0.95,
+    match_rate_threshold: float = 0.99,
 ) -> FormatDetectionResult:
     """Auto-detect a source's envelope format (SPEC.md §2.2 step 1):
-    take up to sample_size lines, score each known pattern independently
-    by what fraction of the sample it successfully parses, and return the
-    one pattern that clears match_rate_threshold.
+    take up to sample_size lines, parse every line against each known
+    pattern, and return the one pattern whose match rate clears
+    match_rate_threshold -- along with every line's actual result
+    (EnvelopeSplit on success, UnknownEnvelopeSplit on failure), not just
+    the aggregate numbers.
 
     Raises NoMatchingPatternError -- the same signal split_envelope()
     uses -- if zero patterns clear the bar (nothing confidently
@@ -141,12 +207,13 @@ def detect_format(
 
     candidates = []
     for name, pattern in _KNOWN_PATTERNS:
-        matched = sum(
-            1 for line in sample if _matches_pattern(name, pattern, line.rstrip("\r\n"))
-        )
+        results = _parse_sample_against_pattern(name, pattern, sample)
+        matched = sum(1 for r in results if isinstance(r, EnvelopeSplit))
         rate = matched / len(sample)
         if rate >= match_rate_threshold:
-            candidates.append(FormatDetectionResult(name, len(sample), matched, rate))
+            candidates.append(
+                FormatDetectionResult(name, len(sample), matched, rate, results)
+            )
 
     if len(candidates) == 1:
         return candidates[0]
@@ -162,29 +229,46 @@ def detect_format(
     )
 
 
-def _matches_pattern(name: str, pattern: re.Pattern[str], stripped: str) -> bool:
-    """Does this specific pattern successfully parse this line -- regex
-    shape *and* that format's own semantic checks (e.g. RFC 5424's
-    PRI/VERSION validation in _from_rfc5424)?
-
-    Only used by detect_format()'s match-rate scoring, which doesn't care
-    *why* a line fails, just whether it does. split_envelope() keeps its
-    own inline logic instead of sharing this: there, a regex match that
-    fails semantic validation is a specific, useful error worth
-    surfacing immediately (SPEC.md §2.2 step 1's actual line-by-line
-    parsing), not something to silently retry against the next pattern
-    the way a genuine regex non-match should be.
+def _parse_sample_against_pattern(
+    name: str, pattern: re.Pattern[str], sample: list[str]
+) -> list[EnvelopeSplit | UnknownEnvelopeSplit]:
+    """Parse every line in sample against one specific named pattern,
+    tagging each result with its position -- used only by detect_format(),
+    once a single winning pattern has already been chosen for the whole
+    source. Unlike split_envelope(), this never falls through to trying a
+    different pattern: a line that fails against the source's own
+    detected format is exactly what becomes an UnknownEnvelopeSplit, not
+    a candidate for some other pattern to silently claim instead.
     """
-    match = pattern.match(stripped)
-    if match is None:
-        return False
-    try:
-        if name == "rfc5424-syslog":
-            _from_rfc5424(name, match.groupdict(), stripped)
-            return True
-    except NoMatchingPatternError:
-        return False
-    return False
+    results: list[EnvelopeSplit | UnknownEnvelopeSplit] = []
+    for i, line in enumerate(sample):
+        stripped = line.rstrip("\r\n")
+        match = pattern.match(stripped)
+        if match is None:
+            results.append(
+                UnknownEnvelopeSplit(
+                    index=i,
+                    raw=line,
+                    attempted_format=name,
+                    reason=f"line does not match {name!r}",
+                )
+            )
+            continue
+        try:
+            if name != "rfc5424-syslog":
+                raise NoMatchingPatternError(
+                    f"no field extractor registered for {name!r}"
+                )
+            parsed = _from_rfc5424(name, match.groupdict(), line)
+        except NoMatchingPatternError as exc:
+            results.append(
+                UnknownEnvelopeSplit(
+                    index=i, raw=line, attempted_format=name, reason=str(exc)
+                )
+            )
+            continue
+        results.append(dataclasses.replace(parsed, index=i))
+    return results
 
 
 def _from_rfc5424(name: str, fields: dict[str, str | None], raw: str) -> EnvelopeSplit:
