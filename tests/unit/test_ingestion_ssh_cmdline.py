@@ -85,3 +85,53 @@ def test_read_lines_strips_ansi_color_codes(monkeypatch: pytest.MonkeyPatch) -> 
     lines = list(SSHCmdlineBackend(connection, "show logging").read_lines())
 
     assert lines == ["ERROR: link down", "plain line"]
+
+
+def test_tail_file_builds_tail_command() -> None:
+    connection = SSHConnection(
+        device_type="linux", host="10.0.0.1", username="admin", password="secret"
+    )
+    backend = SSHCmdlineBackend.tail_file(connection, "/var/log/messages", 100)
+
+    assert backend.connection == connection
+    assert backend.command == "tail -n 100 /var/log/messages"
+
+
+def test_tail_file_quotes_path_with_spaces() -> None:
+    connection = SSHConnection(
+        device_type="linux", host="10.0.0.1", username="admin", password="secret"
+    )
+    backend = SSHCmdlineBackend.tail_file(connection, "/var/log/my app.log", 50)
+
+    assert backend.command == "tail -n 50 '/var/log/my app.log'"
+
+
+def test_tail_file_rejects_non_positive_line_count() -> None:
+    connection = SSHConnection(
+        device_type="linux", host="10.0.0.1", username="admin", password="secret"
+    )
+
+    with pytest.raises(ValueError, match="last_n_lines must be positive"):
+        SSHCmdlineBackend.tail_file(connection, "/var/log/messages", 0)
+
+    with pytest.raises(ValueError, match="last_n_lines must be positive"):
+        SSHCmdlineBackend.tail_file(connection, "/var/log/messages", -5)
+
+
+def test_tail_file_end_to_end_runs_and_closes(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_connect_handler = _mock_connect_handler("line one\nline two")
+    monkeypatch.setattr(ssh_cmdline, "ConnectHandler", mock_connect_handler)
+    connection = SSHConnection(
+        device_type="linux", host="10.0.0.1", username="admin", password="secret"
+    )
+
+    backend = SSHCmdlineBackend.tail_file(connection, "/var/log/messages", 2)
+    lines = list(backend.read_lines())
+
+    assert lines == ["line one", "line two"]
+    mock_connect_handler.assert_called_once_with(
+        device_type="linux", host="10.0.0.1", username="admin", password="secret"
+    )
+    conn = mock_connect_handler.return_value
+    conn.send_command.assert_called_once_with("tail -n 2 /var/log/messages")
+    conn.__exit__.assert_called_once()  # connection actually closed
