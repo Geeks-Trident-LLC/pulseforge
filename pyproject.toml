@@ -76,6 +76,12 @@ dev = [
     "ruff>=0.4.0",
     "black>=24.0.0",
     "mypy>=1.10.0",
+    # netmiko is optional at runtime (see the sampling extra above), but
+    # the ssh_cmdline ingestion backend is exercised by tests (with
+    # ConnectHandler mocked, never a real device) -- dev always pulls it
+    # in so that coverage never silently skips, mirroring parseforge's
+    # own reasoning for including every provider SDK in its dev extra.
+    "netmiko>=4.0",
 ]
 # Tooling for the Makefile's bump-* targets and a future package-build
 # step -- mirrors parseforge's own "release" extra. bump2version isn't

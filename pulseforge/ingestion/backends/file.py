@@ -11,4 +11,6 @@ class FileBackend:
         self.path = path
 
     def read_lines(self) -> Iterator[str]:
-        raise NotImplementedError
+        with self.path.open("r", encoding="utf-8") as f:
+            for line in f:
+                yield line.rstrip("\r\n")
