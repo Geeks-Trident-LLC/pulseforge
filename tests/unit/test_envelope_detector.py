@@ -5,6 +5,7 @@ NoMatchingPatternError instead of silently misparsing.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -13,9 +14,16 @@ import pulseforge.envelope.detector as detector
 from pulseforge.envelope.detector import (
     DuplicatePatternNameError,
     NoMatchingPatternError,
+    detect_format,
     load_known_patterns,
     split_envelope,
 )
+
+_VALID_RFC5424_LINE = (
+    "<34>1 2003-10-11T22:14:15.003Z mymachine.example.com su - ID47 - "
+    "'su root' failed for lonvick on /dev/pts/8"
+)
+_GARBAGE_LINE = "this is not a syslog line at all"
 
 
 def test_load_known_patterns_has_rfc5424() -> None:
@@ -132,3 +140,65 @@ def test_duplicate_pattern_name_raises(
     monkeypatch.setattr(detector, "_PATTERNS_PATH", duplicate_patterns)
     with pytest.raises(DuplicatePatternNameError, match="rfc5424-syslog"):
         load_known_patterns()
+
+
+def test_detect_format_at_default_threshold() -> None:
+    # 95/100 -- exactly clears the default 95% bar (>=, not >).
+    sample = [_VALID_RFC5424_LINE] * 95 + [_GARBAGE_LINE] * 5
+    result = detect_format(sample)
+    assert result.format == "rfc5424-syslog"
+    assert result.sample_size == 100
+    assert result.matched == 95
+    assert result.match_rate == pytest.approx(0.95)
+
+
+def test_detect_format_below_default_threshold_raises() -> None:
+    # 90/100 -- clears SPEC.md's illustrative "e.g. >=90%" but not our
+    # actual 95% default; must not silently detect on a looser bar.
+    sample = [_VALID_RFC5424_LINE] * 90 + [_GARBAGE_LINE] * 10
+    with pytest.raises(NoMatchingPatternError, match="no known pattern cleared"):
+        detect_format(sample)
+
+
+def test_detect_format_custom_threshold_allows_lower_bar() -> None:
+    sample = [_VALID_RFC5424_LINE] * 85 + [_GARBAGE_LINE] * 15
+    result = detect_format(sample, match_rate_threshold=0.8)
+    assert result.match_rate == pytest.approx(0.85)
+
+
+def test_detect_format_empty_source_raises() -> None:
+    with pytest.raises(NoMatchingPatternError, match="no lines to sample"):
+        detect_format([])
+
+
+def test_detect_format_only_samples_first_sample_size_lines() -> None:
+    # 100 valid lines followed by 100 garbage lines: default sample_size
+    # of 100 must only ever look at the valid prefix, never touch the
+    # garbage tail, regardless of how many lines the source actually has.
+    sample = [_VALID_RFC5424_LINE] * 100 + [_GARBAGE_LINE] * 100
+    result = detect_format(sample)
+    assert result.sample_size == 100
+    assert result.matched == 100
+    assert result.match_rate == pytest.approx(1.0)
+
+
+def test_detect_format_respects_smaller_custom_sample_size() -> None:
+    sample = [_VALID_RFC5424_LINE] * 10 + [_GARBAGE_LINE] * 90
+    result = detect_format(sample, sample_size=10)
+    assert result.sample_size == 10
+    assert result.matched == 10
+
+
+def test_detect_format_ambiguous_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Not reachable with patterns.yaml's real single entry -- exercises
+    the ambiguous branch directly by faking two patterns that both
+    "match" every sample line, standing in for two real formats whose
+    regex banks both happen to clear the bar on the same source.
+    """
+    fake_patterns = [("fake-a", re.compile(".*")), ("fake-b", re.compile(".*"))]
+    monkeypatch.setattr(detector, "_KNOWN_PATTERNS", fake_patterns)
+    monkeypatch.setattr(
+        detector, "_matches_pattern", lambda name, pattern, stripped: True
+    )
+    with pytest.raises(NoMatchingPatternError, match="ambiguous"):
+        detect_format(["anything"] * 10)
