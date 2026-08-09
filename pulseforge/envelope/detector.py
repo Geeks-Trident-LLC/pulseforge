@@ -139,13 +139,19 @@ def load_known_patterns() -> list[tuple[str, re.Pattern[str]]]:
     """Load and compile every entry in patterns.yaml, in file order --
     the order they're tried in split_envelope().
 
-    Every pattern is compiled with re.VERBOSE (patterns.yaml writes a
-    readable, commented, multi-line regex instead of one long line -- see
-    its own header comment for the whitespace/escaping conventions that
-    requires) and re.ASCII (RFC 5424's DIGIT is strictly ASCII 0-9; \\d
-    without re.ASCII also matches non-ASCII Unicode decimal digits --
-    Arabic-Indic, Devanagari, etc. -- which would silently accept a line
-    RFC 5424 doesn't).
+    Every pattern is compiled with:
+    - re.VERBOSE: patterns.yaml writes a readable, commented, multi-line
+      regex instead of one long line -- see its own header comment for
+      the whitespace/escaping conventions that requires.
+    - re.ASCII: RFC 5424's DIGIT is strictly ASCII 0-9; \\d without
+      re.ASCII also matches non-ASCII Unicode decimal digits -- Arabic-
+      Indic, Devanagari, etc. -- which would silently accept a line RFC
+      5424 doesn't.
+    - re.DOTALL: MSG's trailing ``.*`` otherwise can't span an embedded
+      newline (Python's ``.`` excludes ``\\n`` by default) -- exactly
+      what reassemble.py's multi-line entries need MSG to hold. Nothing
+      else in the pattern uses a bare ``.``, so this only changes MSG's
+      behavior, not HOSTNAME/APP-NAME/etc.'s explicit character classes.
     """
     entries = yaml.safe_load(_PATTERNS_PATH.read_text(encoding="utf-8")) or []
     seen: set[str] = set()
@@ -158,7 +164,8 @@ def load_known_patterns() -> list[tuple[str, re.Pattern[str]]]:
             )
         seen.add(name)
         if entry.get("pattern"):
-            patterns.append((name, re.compile(entry["pattern"], re.VERBOSE | re.ASCII)))
+            flags = re.VERBOSE | re.ASCII | re.DOTALL
+            patterns.append((name, re.compile(entry["pattern"], flags)))
     return patterns
 
 
