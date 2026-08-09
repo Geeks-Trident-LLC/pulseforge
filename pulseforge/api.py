@@ -25,6 +25,7 @@ from .envelope.detector import (
     detect_format,
     split_envelope,
 )
+from .envelope.reassemble import reassemble_lines
 from .health.pulse import CategoryHealth, score_health
 from .ingestion.backends.file import FileBackend
 from .ingestion.core import IngestionBackend, strip_ansi_codes
@@ -39,6 +40,7 @@ __all__ = [
     "NoMatchingPatternError",
     "split_envelope",
     "detect_format",
+    "reassemble_lines",
     "IngestionBackend",
     "FileBackend",
     "strip_ansi_codes",

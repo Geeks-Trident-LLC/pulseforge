@@ -2,7 +2,7 @@
 # (detector.py). Each entry names the format and gives the regex used to
 # split <timestamp><separator><marker?>: <body> away from the raw line.
 #
-# Every pattern here is compiled with re.VERBOSE | re.ASCII
+# Every pattern here is compiled with re.VERBOSE | re.ASCII | re.DOTALL
 # (detector.py's load_known_patterns()):
 # - VERBOSE: a literal single space in the wire format is written as
 #   \x20, never a bare space, since re.VERBOSE ignores unescaped
@@ -12,6 +12,11 @@
 #   (Arabic-Indic, Devanagari, ...), which these grammars' DIGIT never
 #   permits -- write \d freely, the flag makes it ASCII-only everywhere
 #   in the pattern, not just where it'd be visually obvious.
+# - DOTALL: MSG's trailing ".*" needs to span an embedded newline (a
+#   multi-line entry reassembled by envelope/reassemble.py has one) --
+#   Python's "." excludes "\n" by default. Only MSG uses a bare "."
+#   below; HOSTNAME/APP-NAME/etc. use explicit character classes, so this
+#   doesn't loosen anything else in the pattern.
 #
 # RFC 5424 only, deliberately (SPEC.md §2.2): its fixed-width,
 # unambiguous grammar (explicit year+timezone, single-token HOSTNAME,
